@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USB Simulator</title>
+<style>
+  :root {
+    --bg: #f4f1ea;
+    --ink: #1f1d1a;
+    --muted: #6d675e;
+    --laptop: #c9ccd1;
+    --laptop-edge: #9fa4ab;
+    --port: #2a2c30;
+    --metal: #d7dade;
+    --metal-dark: #9aa0a7;
+    --plastic: #2f3a4a;
+    --plastic-back: #26303d;
+    --wrong: #c2412d;
+    --right: #2e8b57;
+    --button: #1f1d1a;
+    --button-ink: #f4f1ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181b;
+      --ink: #ece8e1;
+      --muted: #9a958c;
+      --laptop: #3a3d43;
+      --laptop-edge: #50545b;
+      --port: #0c0d0f;
+      --plastic: #4a6384;
+      --plastic-back: #3c516d;
+      --wrong: #ff7a63;
+      --right: #5fd08f;
+      --button: #ece8e1;
+      --button-ink: #17181b;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; letter-spacing: .02em; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: .95rem; }
+
+  .stage {
+    position: relative;
+    width: min(360px, 100%);
+    height: 440px;
+    overflow: hidden;
+  }
+
+  /* The laptop edge, seen from above. The port opening faces down. */
+  .laptop {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 90px;
+    background: var(--laptop);
+    border-bottom: 4px solid var(--laptop-edge);
+    border-radius: 0 0 10px 10px;
+    z-index: 2;
+  }
+  .port {
+    position: absolute;
+    left: 50%;
+    bottom: -4px;
+    width: 76px;
+    height: 14px;
+    transform: translateX(-50%);
+    background: var(--port);
+    border-radius: 2px 2px 0 0;
+  }
+  .led {
+    position: absolute;
+    right: 18px;
+    top: 16px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--laptop-edge);
+    transition: background .2s, box-shadow .2s;
+  }
+  .led.on { background: var(--right); box-shadow: 0 0 10px var(--right); }
+  .toast {
+    position: absolute;
+    left: 14px;
+    top: 12px;
+    font-size: .8rem;
+    color: var(--ink);
+    opacity: 0;
+    transition: opacity .3s;
+  }
+  .toast.show { opacity: 1; }
+
+  /* The stick. Moves up/down; the inner part flips. */
+  .stick {
+    position: absolute;
+    left: 50%;
+    top: 200px;
+    width: 72px;
+    height: 220px;
+    margin-left: -36px;
+    perspective: 600px;
+    z-index: 1;
+  }
+  .flipper {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+  }
+  .face {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+  }
+  .face.back { transform: rotateY(180deg); }
+  .face svg { display: block; width: 100%; height: 100%; }
+
+  .message {
+    min-height: 2.4em;
+    font-size: 1.8rem;
+    font-weight: 700;
+    margin: 12px 0 4px;
+    text-align: center;
+  }
+  .message.wrong { color: var(--wrong); }
+  .message.right { color: var(--right); }
+
+  .stats {
+    display: flex;
+    gap: 20px;
+    color: var(--muted);
+    font-size: .9rem;
+    margin-bottom: 16px;
+  }
+  .stats b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .controls { display: flex; gap: 10px; align-items: center; }
+  button {
+    font: inherit;
+    font-weight: 600;
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  #go {
+    background: var(--button);
+    color: var(--button-ink);
+    padding: 12px 28px;
+    font-size: 1.1rem;
+    min-width: 180px;
+  }
+  #go:disabled { opacity: .5; cursor: default; }
+  #sound {
+    background: transparent;
+    color: var(--muted);
+    padding: 8px 12px;
+    font-size: .85rem;
+  }
+  button:focus-visible { outline: 3px solid var(--right); outline-offset: 3px; }
+</style>
+</head>
+<body>
+  <h1>USB Simulator</h1>
+  <p class="sub">A faithful model of plugging in a USB stick.</p>
+
+  <div class="stage">
+    <div class="laptop">
+      <span class="toast" id="toast">USB device connected</span>
+      <span class="led" id="led"></span>
+      <span class="port"></span>
+    </div>
+
+    <div class="stick" id="stick">
+      <div class="flipper" id="flipper">
+        <div class="face front"><svg viewBox="0 0 72 220" aria-hidden="true">
+          <rect x="6" y="0" width="60" height="72" rx="2" fill="var(--metal)" stroke="var(--metal-dark)" stroke-width="2"/>
+          <rect x="18" y="14" width="12" height="10" fill="var(--metal-dark)"/>
+          <rect x="42" y="14" width="12" height="10" fill="var(--metal-dark)"/>
+          <rect x="0" y="68" width="72" height="152" rx="10" fill="var(--plastic)"/>
+          <g stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" opacity=".85">
+            <path d="M36 170 V110"/>
+            <path d="M36 110 l-6 8 M36 110 l6 8"/>
+            <path d="M36 150 l-12 -10 v-8"/>
+            <path d="M36 140 l12 -10 v-6"/>
+          </g>
+          <circle cx="24" cy="130" r="3.5" fill="#fff" opacity=".85"/>
+          <rect x="45" y="120" width="6" height="6" fill="#fff" opacity=".85"/>
+          <text x="36" y="200" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#fff" opacity=".7">SIDE A</text>
+        </svg></div>
+        <div class="face back"><svg viewBox="0 0 72 220" aria-hidden="true">
+          <rect x="6" y="0" width="60" height="72" rx="2" fill="var(--metal)" stroke="var(--metal-dark)" stroke-width="2"/>
+          <rect x="18" y="14" width="12" height="10" fill="var(--metal-dark)"/>
+          <rect x="42" y="14" width="12" height="10" fill="var(--metal-dark)"/>
+          <rect x="0" y="68" width="72" height="152" rx="10" fill="var(--plastic-back)"/>
+          <text x="36" y="200" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#fff" opacity=".7">SIDE B</text>
+        </svg></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="message" id="message" aria-live="polite">&nbsp;</div>
+  <div class="stats">
+    <span>Tries: <b id="tries">0</b></span>
+    <span>Flips: <b id="flips">0</b></span>
+    <span>Side up: <b id="side">A</b></span>
+  </div>
+  <div class="controls">
+    <button id="go" type="button">Plug in</button>
+    <button id="sound" type="button" aria-pressed="true">Sound: on</button>
+  </div>
+
+<script src="usb.js"></script>
+<script>
+  const usb = UsbSim.createUsb();
+  const $ = (id) => document.getElementById(id);
+  const stick = $('stick'), flipper = $('flipper'), go = $('go');
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const speed = reduce ? 0.3 : 1;
+
+  // Distances in px: where the metal touches the port, and where it is fully in.
+  const TOUCH = -110, INSIDE = -176;
+  let angle = 0, tries = 0, soundOn = true;
+
+  function anim(el, frames, ms, easing = 'ease-in-out') {
+    return el.animate(frames, { duration: ms * speed, easing, fill: 'forwards' }).finished;
+  }
+
+  // Tiny sound effects, made on the fly.
+  let ctx;
+  function tone(freq, start, len, type = 'sine', vol = 0.15) {
+    if (!soundOn) return;
+    ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    const t = ctx.currentTime + start;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + len);
+    o.connect(g).connect(ctx.destination);
+    o.start(t);
+    o.stop(t + len);
+  }
+  const bonk = () => tone(90, 0, 0.18, 'square', 0.12);
+  const chime = () => { tone(660, 0, 0.25); tone(990, 0.12, 0.35); };
+  const unchime = () => { tone(990, 0, 0.25); tone(660, 0.12, 0.35); };
+
+  function say(text, kind) {
+    const m = $('message');
+    m.textContent = text;
+    m.className = 'message ' + (kind || '');
+  }
+
+  function render() {
+    go.textContent = usb.button;
+    $('tries').textContent = tries;
+    $('flips').textContent = usb.flips;
+    $('side').textContent = usb.side;
+  }
+
+  async function step() {
+    go.disabled = true;
+    const r = usb.next();
+
+    if (r.unplugged) {
+      $('led').classList.remove('on');
+      $('toast').classList.remove('show');
+      unchime();
+      await anim(stick, [{ transform: `translateY(${INSIDE}px)` }, { transform: 'translateY(0)' }], 500);
+      tries = 0;
+      say(' ');
+    } else {
+      if (r.flip) {
+        say(' ');
+        await anim(flipper, [{ transform: `rotateY(${angle}deg)` }, { transform: `rotateY(${angle + 180}deg)` }], 550);
+        angle += 180;
+        $('side').textContent = usb.side;
+      }
+      tries++;
+      $('tries').textContent = tries;
+      await anim(stick, [{ transform: 'translateY(0)' }, { transform: `translateY(${TOUCH}px)` }], 380, 'ease-in');
+
+      if (r.fits) {
+        await anim(stick, [{ transform: `translateY(${TOUCH}px)` }, { transform: `translateY(${INSIDE}px)` }], 260, 'ease-out');
+        $('led').classList.add('on');
+        $('toast').classList.add('show');
+        chime();
+        say(r.message, 'right');
+      } else {
+        bonk();
+        say(r.message, 'wrong');
+        await anim(stick, [
+          { transform: `translate(0, ${TOUCH}px)` },
+          { transform: `translate(-6px, ${TOUCH + 2}px)` },
+          { transform: `translate(6px, ${TOUCH + 2}px)` },
+          { transform: `translate(-4px, ${TOUCH + 2}px)` },
+          { transform: `translate(0, ${TOUCH}px)` },
+        ], 260, 'linear');
+        await anim(stick, [{ transform: `translateY(${TOUCH}px)` }, { transform: 'translateY(0)' }], 350, 'ease-out');
+      }
+    }
+
+    render();
+    go.disabled = false;
+    go.focus();
+  }
+
+  go.addEventListener('click', step);
+  $('sound').addEventListener('click', (e) => {
+    soundOn = !soundOn;
+    e.currentTarget.textContent = 'Sound: ' + (soundOn ? 'on' : 'off');
+    e.currentTarget.setAttribute('aria-pressed', String(soundOn));
+  });
+  render();
+</script>
+</body>
+</html>
